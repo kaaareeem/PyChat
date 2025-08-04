@@ -1,0 +1,1 @@
+A simple Python-based terminal chat app with a multithreaded server and client using sockets. Users can join, set nicknames, and exchange real-time messages. Built as a capstone project to explore networking, concurrency, and Python fundamentals in a lightweight, Discord-style chat format.
