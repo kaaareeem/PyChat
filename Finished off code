@@ -1,0 +1,157 @@
+import socket
+import threading
+import pygame
+import sys
+
+# Server config
+HOST = '127.0.0.1'
+PORT = 55556
+
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.bind((HOST, PORT))
+server.listen()
+
+clients = []
+nicknames = []
+messages = []  # Store last messages for display
+
+# Pygame setup
+pygame.init()
+WIDTH, HEIGHT = 700, 550
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Chat Server Visualization")
+FONT = pygame.font.SysFont('arial', 20)
+CLOCK = pygame.time.Clock()
+
+# Colors
+BG_COLOR = (30, 30, 30)
+TEXT_COLOR = (230, 230, 230)
+CLIENT_COLOR = (100, 200, 100)
+MSG_BG_COLOR = (50, 50, 50)
+INPUT_BG_COLOR = (40, 40, 40)
+INPUT_ACTIVE_COLOR = (70, 70, 70)
+
+MAX_MESSAGES = 20
+
+input_active = False
+input_text = ""
+
+def draw_text(surface, text, pos, color=TEXT_COLOR):
+    rendered = FONT.render(text, True, color)
+    surface.blit(rendered, pos)
+
+def broadcast(message):
+    for client in clients:
+        try:
+            client.send(message)
+        except:
+            pass
+
+def handle(client):
+    while True:
+        try:
+            message = client.recv(1024)
+            if not message:
+                break
+            decoded_msg = message.decode('utf-8')
+            messages.append(decoded_msg)
+            if len(messages) > MAX_MESSAGES:
+                messages.pop(0)
+            broadcast(message)
+        except:
+            if client in clients:
+                index = clients.index(client)
+                clients.remove(client)
+                client.close()
+                nickname = nicknames[index]
+                messages.append(f"{nickname} left the chat!")
+                if len(messages) > MAX_MESSAGES:
+                    messages.pop(0)
+                broadcast(f'{nickname} left the chat!'.encode('utf-8'))
+                nicknames.remove(nickname)
+            break
+
+def receive():
+    while True:
+        client, address = server.accept()
+        print(f"Connected with {str(address)}")
+
+        client.send('NICK'.encode('utf-8'))
+        nickname = client.recv(1024).decode('utf-8')
+        nicknames.append(nickname)
+        clients.append(client)
+
+        print(f'Nickname is {nickname}')
+        messages.append(f"{nickname} joined the chat!")
+        if len(messages) > MAX_MESSAGES:
+            messages.pop(0)
+        broadcast(f'{nickname} joined the chat!'.encode('utf-8'))
+        client.send('Connected to the server!'.encode('utf-8'))
+
+        thread = threading.Thread(target=handle, args=(client,))
+        thread.daemon = True
+        thread.start()
+
+def pygame_loop():
+    global input_active, input_text
+
+    input_rect = pygame.Rect(220, HEIGHT - 40, WIDTH - 230, 30)
+
+    while True:
+        screen.fill(BG_COLOR)
+
+        # Draw title
+        draw_text(screen, "Chat Server Visualization", (10, 10), (255, 255, 0))
+
+        # Draw connected clients box
+        pygame.draw.rect(screen, CLIENT_COLOR, (10, 40, 200, HEIGHT - 80), border_radius=8)
+        draw_text(screen, "Connected Clients:", (20, 50), (0, 0, 0))
+        for i, nick in enumerate(nicknames):
+            draw_text(screen, nick, (20, 80 + i * 25), (0, 0, 0))
+
+        # Draw chat messages box
+        pygame.draw.rect(screen, MSG_BG_COLOR, (220, 40, WIDTH - 230, HEIGHT - 90), border_radius=8)
+        draw_text(screen, "Chat Messages:", (230, 50))
+        for i, msg in enumerate(messages):
+            draw_text(screen, msg, (230, 80 + i * 22))
+
+        # Draw input box
+        pygame.draw.rect(screen, INPUT_ACTIVE_COLOR if input_active else INPUT_BG_COLOR, input_rect, border_radius=6)
+        draw_text(screen, input_text, (input_rect.x + 5, input_rect.y + 5))
+
+        # Handle events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                server.close()
+                sys.exit()
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if input_rect.collidepoint(event.pos):
+                    input_active = True
+                else:
+                    input_active = False
+
+            elif event.type == pygame.KEYDOWN and input_active:
+                if event.key == pygame.K_RETURN:
+                    if input_text.strip() != "":
+                        msg_to_send = f"SERVER: {input_text.strip()}"
+                        messages.append(msg_to_send)
+                        if len(messages) > MAX_MESSAGES:
+                            messages.pop(0)
+                        broadcast(msg_to_send.encode('utf-8'))
+                        input_text = ""
+                elif event.key == pygame.K_BACKSPACE:
+                    input_text = input_text[:-1]
+                else:
+                    if len(input_text) < 100:
+                        input_text += event.unicode
+
+        pygame.display.flip()
+        CLOCK.tick(30)
+
+receive_thread = threading.Thread(target=receive)
+receive_thread.daemon = True
+receive_thread.start()
+
+pygame_loop()
